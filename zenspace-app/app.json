@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "CalmSense",
+    "slug": "calmsense-app",
+    "version": "1.0.0",
+    "sdkVersion": "52.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "calmsense",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.calmsense.app"
+    },
+    "android": {
+      "package": "com.calmsense.app",
+      "usesCleartextTraffic": true,
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.PACKAGE_USAGE_STATS"
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#8B5CF6",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#8B5CF6"
+        }
+      ],
+      "./plugins/withBehaviorCapture.js",
+      "expo-sqlite",
+      "expo-asset"
+    ],
+    "newArchEnabled": false,
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "apiBaseUrl": "http://172.20.10.3:8000",
+      "eas": {
+        "projectId": "727fd0c9-443e-4890-b710-42107350ebdb"
+      }
+    }
+  }
+}
