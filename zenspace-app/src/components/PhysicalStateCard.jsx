@@ -2,67 +2,63 @@ import { View, Text, StyleSheet } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import { DASHBOARD_PALETTE } from '../lib/theme';
 
-const SLEEP_TARGET_HOURS = 8;
-
 function Donut({ pct, size = 120 }) {
   const sw = 12, r = (size - sw) / 2;
   const circ = 2 * Math.PI * r;
-  const segments = [
-    { pct: Math.min(pct, 60), color: '#c4b5fd' },
-    { pct: Math.min(Math.max(pct - 60, 0), 25), color: '#bef264' },
-    { pct: Math.min(Math.max(pct - 85, 0), 15), color: '#93c5fd' },
-  ];
+  const dash = (Math.min(Math.max(pct, 0), 100) / 100) * circ;
 
-  let offsetAcc = 0;
   return (
     <Svg width={size} height={size} style={{ transform: [{ rotate: '-90deg' }] }}>
       <Circle cx={size / 2} cy={size / 2} r={r} stroke="#f1f5f9" strokeWidth={sw} fill="none" />
-      {segments.map((s, i) => {
-        if (s.pct <= 0) return null;
-        const dash = (s.pct / 100) * circ;
-        const el = (
-          <Circle
-            key={i}
-            cx={size / 2} cy={size / 2} r={r}
-            stroke={s.color} strokeWidth={sw} fill="none"
-            strokeLinecap="round"
-            strokeDasharray={`${dash} ${circ}`}
-            strokeDashoffset={-offsetAcc}
-          />
-        );
-        offsetAcc += dash;
-        return el;
-      })}
+      {dash > 0 && (
+        <Circle
+          cx={size / 2} cy={size / 2} r={r}
+          stroke={DASHBOARD_PALETTE.accentRose} strokeWidth={sw} fill="none"
+          strokeLinecap="round"
+          strokeDasharray={`${dash} ${circ}`}
+        />
+      )}
     </Svg>
   );
 }
 
+// Breaks today's real, synced screen time (device_hours_per_day) into social
+// vs. other minutes (social_media_mins). Both fields come straight from the
+// backend's aggregation over real behavior_observations rows — unlike sleep,
+// which the pipeline never captures, so this card no longer touches it.
 export default function PhysicalStateCard({ telemetry }) {
-  const achieved = telemetry?.sleep_hours ?? 0;
-  const missing = Math.max(SLEEP_TARGET_HOURS - achieved, 0);
-  const pct = Math.min(Math.round((achieved / SLEEP_TARGET_HOURS) * 100), 100);
+  const hasData = telemetry?.device_hours_per_day != null;
+  const totalMins = hasData ? Math.round(telemetry.device_hours_per_day * 60) : 0;
+  const socialMins = Math.min(telemetry?.social_media_mins ?? 0, totalMins);
+  const otherMins = Math.max(totalMins - socialMins, 0);
+  const pct = totalMins > 0 ? Math.round((socialMins / totalMins) * 100) : 0;
 
   return (
     <View style={styles.card}>
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Physical state</Text>
+        <Text style={styles.title}>Screen time breakdown</Text>
         <Text style={styles.tuneIcon}>⚙︎</Text>
       </View>
 
-      <View style={styles.body}>
-        <View style={styles.legend}>
-          <LegendRow color="#c4b5fd" value={`${SLEEP_TARGET_HOURS}h Target`} label="Sleep Goal" />
-          <LegendRow color="#bef264" value={`${achieved.toFixed(1)}h Achieved`} label="Last Night" />
-          <LegendRow color="#93c5fd" value={`${missing.toFixed(1)}h Missing`} label="Deficit" />
-        </View>
+      {!hasData ? (
+        <Text style={styles.emptyText}>No screen time synced yet today.</Text>
+      ) : (
+        <View style={styles.body}>
+          <View style={styles.legend}>
+            <LegendRow color={DASHBOARD_PALETTE.accentRose} value={`${Math.floor(totalMins / 60)}h ${totalMins % 60}m Total`} label="Screen Time" />
+            <LegendRow color={DASHBOARD_PALETTE.accentLilac} value={`${socialMins}m Social`} label="Social Media" />
+            <LegendRow color={DASHBOARD_PALETTE.accentSky} value={`${otherMins}m Other`} label="Everything Else" />
+          </View>
 
-        <View style={styles.donutWrap}>
-          <Donut pct={pct} />
-          <View style={styles.donutCenter}>
-            <Text style={styles.pctText}>{pct}%</Text>
+          <View style={styles.donutWrap}>
+            <Donut pct={pct} />
+            <View style={styles.donutCenter}>
+              <Text style={styles.pctText}>{pct}%</Text>
+              <Text style={styles.pctLabel}>social</Text>
+            </View>
           </View>
         </View>
-      </View>
+      )}
     </View>
   );
 }
@@ -87,6 +83,7 @@ const styles = StyleSheet.create({
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
   title: { fontSize: 17, fontWeight: '800', color: DASHBOARD_PALETTE.textPrimary },
   tuneIcon: { fontSize: 16, color: DASHBOARD_PALETTE.textMuted },
+  emptyText: { fontSize: 13, color: DASHBOARD_PALETTE.textMuted, lineHeight: 19 },
   body: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   legend: { gap: 16, flex: 1 },
   legendRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -96,4 +93,5 @@ const styles = StyleSheet.create({
   donutWrap: { width: 120, height: 120, alignItems: 'center', justifyContent: 'center' },
   donutCenter: { position: 'absolute', alignItems: 'center' },
   pctText: { fontSize: 22, fontWeight: '800', color: DASHBOARD_PALETTE.textPrimary },
+  pctLabel: { fontSize: 10, color: DASHBOARD_PALETTE.textMuted, marginTop: -2 },
 });

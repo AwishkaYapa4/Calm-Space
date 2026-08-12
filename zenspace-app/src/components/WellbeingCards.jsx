@@ -8,36 +8,32 @@ function formatHours(hours) {
   return `${h}h ${m}m`;
 }
 
-// Mood is framed as a soft, positive metric rather than a raw stress number —
-// derived from sleep quality so it still reflects real signal without exposing the model score.
-function moodFromSleepQuality(sleepQuality) {
-  if (sleepQuality == null) return null;
-  return Math.round((sleepQuality / 100) * 10 * 10) / 10;
-}
-
+// Screen time and unlocks are the two fields the passive-capture pipeline
+// actually aggregates from real behavior_observations rows — unlike
+// sleep/mood, which the backend has no sensor for and always returns null.
 export default function WellbeingCards({ telemetry }) {
-  const sleepHours = telemetry?.sleep_hours;
-  const mood = moodFromSleepQuality(telemetry?.sleep_quality);
+  const screenTime = telemetry?.device_hours_per_day;
+  const unlocks = telemetry?.phone_unlocks;
 
   return (
     <View style={styles.row}>
       <View style={styles.card}>
         <View style={styles.iconWrap}>
-          <Text style={styles.icon}>🧘</Text>
+          <Text style={styles.icon}>📱</Text>
         </View>
         <View>
-          <Text style={styles.label}>Sleeping Times</Text>
-          <Text style={styles.value}>{formatHours(sleepHours)}</Text>
+          <Text style={styles.label}>Screen Time</Text>
+          <Text style={styles.value}>{formatHours(screenTime)}</Text>
         </View>
       </View>
 
       <View style={styles.card}>
         <View style={[styles.iconWrap, { backgroundColor: '#fff7ed' }]}>
-          <Text style={styles.icon}>🙂</Text>
+          <Text style={styles.icon}>🔓</Text>
         </View>
         <View>
-          <Text style={styles.label}>Mood Level</Text>
-          <Text style={styles.value}>{mood != null ? `${mood}/10` : '—'}</Text>
+          <Text style={styles.label}>Phone Unlocks</Text>
+          <Text style={styles.value}>{unlocks ?? '—'}</Text>
         </View>
       </View>
     </View>

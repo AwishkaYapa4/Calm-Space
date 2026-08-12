@@ -115,11 +115,11 @@ async function aggregateWindow(db, windowStart, windowEnd) {
     ]
   );
 
-  // Only run deviation/EMA-trigger analysis once we have a couple of days of
+  // Only run deviation/EMA-trigger analysis once we have a full day of
   // history — otherwise every early window looks "anomalous" against nothing,
-  // and it saves a pointless network round-trip for the first ~2 days.
-  // 192 = 2 days x 96 windows/day (15-minute windows).
-  const MIN_HISTORY_WINDOWS = 192;
+  // and it saves a pointless network round-trip for the first day.
+  // 96 = 1 day x 96 windows/day (15-minute windows).
+  const MIN_HISTORY_WINDOWS = 96;
   const historyCheck = await db.getFirstAsync(
     'SELECT COUNT(*) as n FROM behavior_observations WHERE window_start < ?',
     [windowStart]

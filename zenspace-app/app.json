@@ -48,7 +48,7 @@
       "router": {
         "origin": false
       },
-      "apiBaseUrl": "http://10.16.201.23:8000",
+      "apiBaseUrl": "https://calmsense-backend.vercel.app",
       "eas": {
         "projectId": "727fd0c9-443e-4890-b710-42107350ebdb"
       }

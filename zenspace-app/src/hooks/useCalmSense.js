@@ -16,7 +16,11 @@ export function useCalmSense() {
       const userIdRaw = await AsyncStorage.getItem('cs_user_id');
       const userId = userIdRaw ? Number(userIdRaw) : undefined;
       const [telemetry, profile] = await Promise.all([fetchTelemetry(userId), fetchProfile(userId)]);
-      setState({ loading: false, telemetry, profile });
+      // Only ever surface backend-confirmed real telemetry. The mock/offline
+      // fallback in api.js has no `source: 'real'` tag — treat anything else
+      // as "nothing captured yet" rather than silently showing fabricated numbers.
+      const realTelemetry = telemetry?.source === 'real' ? telemetry : null;
+      setState({ loading: false, telemetry: realTelemetry, profile });
     } catch {
       setState(prev => ({ ...prev, loading: false }));
     }
