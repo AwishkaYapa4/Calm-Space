@@ -17,7 +17,6 @@
       "usesCleartextTraffic": true,
       "permissions": [
         "android.permission.POST_NOTIFICATIONS",
-        "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.PACKAGE_USAGE_STATS"
       ],
       "adaptiveIcon": {
@@ -49,7 +48,7 @@
       "router": {
         "origin": false
       },
-      "apiBaseUrl": "http://172.20.10.3:8000",
+      "apiBaseUrl": "http://10.16.201.23:8000",
       "eas": {
         "projectId": "727fd0c9-443e-4890-b710-42107350ebdb"
       }

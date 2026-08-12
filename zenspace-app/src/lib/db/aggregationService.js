@@ -118,11 +118,13 @@ async function aggregateWindow(db, windowStart, windowEnd) {
   // Only run deviation/EMA-trigger analysis once we have a couple of days of
   // history — otherwise every early window looks "anomalous" against nothing,
   // and it saves a pointless network round-trip for the first ~2 days.
+  // 192 = 2 days x 96 windows/day (15-minute windows).
+  const MIN_HISTORY_WINDOWS = 192;
   const historyCheck = await db.getFirstAsync(
     'SELECT COUNT(*) as n FROM behavior_observations WHERE window_start < ?',
     [windowStart]
   );
-  if ((historyCheck?.n ?? 0) < 8) return;
+  if ((historyCheck?.n ?? 0) < MIN_HISTORY_WINDOWS) return;
 
   const userIdRaw = await AsyncStorage.getItem('cs_user_id');
   const userId = userIdRaw ? Number(userIdRaw) : undefined;

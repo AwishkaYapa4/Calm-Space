@@ -26,7 +26,17 @@ def robust_z_score(value, history):
     med = median(history)
     mad_val = mad(history, med)
     if mad_val == 0:
-        if value == med:
-            return 0.0
-        return 3.5 if value > med else -3.5
+        # MAD is median-based, so it reads as 0 whenever more than half the
+        # history is identical even if the rest isn't — stdev still picks up
+        # that spread, so try it before giving up on measuring variability.
+        stdev_val = statistics.pstdev(history)
+        if stdev_val > 0:
+            return (value - med) / stdev_val
+        # History is genuinely constant (real variance, not just MAD, is 0).
+        # With a short study (few data points per slot) this is common and
+        # doesn't mean "any deviation is extreme" — it means we don't have
+        # enough spread info to judge the deviation's size at all, so treat
+        # it the same as insufficient history rather than forcing a hard
+        # +/-3.5 that would flag even a trivial one-unit change as anomalous.
+        return 0.0
     return (MAD_SCALE * (value - med)) / mad_val
