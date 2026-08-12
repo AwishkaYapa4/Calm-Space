@@ -5,6 +5,34 @@ import datetime, os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./calmsense.db")
 
+# This app has exactly one user base (Sri Lanka), so every timestamp column
+# below is stored in Sri Lanka local time (UTC+5:30) rather than UTC —
+# researchers reading the Neon console directly were seeing UTC rows that
+# looked ~5.5h stale/confusing against their own clock. Kept naive (no
+# tzinfo) so it compares directly with plain `datetime.datetime` values
+# throughout the codebase.
+SRI_LANKA_OFFSET = datetime.timedelta(hours=5, minutes=30)
+
+
+def sl_now() -> datetime.datetime:
+    """Current time in Sri Lanka local time — the one clock this app's data should read in."""
+    return datetime.datetime.utcnow() + SRI_LANKA_OFFSET
+
+
+def sl_from_epoch_ms(ms: int) -> datetime.datetime:
+    """Converts a device epoch-ms timestamp (an absolute UTC instant) to Sri
+    Lanka local time for storage."""
+    return datetime.datetime.utcfromtimestamp(ms / 1000) + SRI_LANKA_OFFSET
+
+
+def epoch_ms_from_sl(dt: datetime.datetime) -> int:
+    """Inverse of sl_from_epoch_ms — turns a stored SL-local datetime back
+    into an absolute epoch-ms instant for API responses (the on-device app
+    deals exclusively in epoch ms, not local time)."""
+    utc_dt = (dt - SRI_LANKA_OFFSET).replace(tzinfo=datetime.timezone.utc)
+    return int(utc_dt.timestamp() * 1000)
+
+
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
@@ -47,7 +75,7 @@ class User(Base):
 
     # Personalization state
     local_threshold = Column(Float, default=5.5)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=sl_now)
 
     # Continuous stress EMA baseline (15-min bucket cadence)
     ema_stress = Column(Float, default=0.0)
@@ -76,7 +104,7 @@ class TelemetrySnapshot(Base):
     ema_stress = Column(Float)
     deviation = Column(Float)
     is_anomaly = Column(Integer, default=0)  # 0/1, SQLite has no bool
-    captured_at = Column(DateTime, default=datetime.datetime.utcnow)
+    captured_at = Column(DateTime, default=sl_now)
 
 
 class InteractionEvent(Base):
@@ -88,7 +116,7 @@ class InteractionEvent(Base):
     metadata_json = Column(Text)
     stress_at_event = Column(Float)
     coping_style = Column(String)     # archetype active at time of event — for research analysis
-    logged_at = Column(DateTime, default=datetime.datetime.utcnow)
+    logged_at = Column(DateTime, default=sl_now)
 
 
 class BehaviorObservation(Base):
@@ -106,7 +134,7 @@ class BehaviorObservation(Base):
     session_count = Column(Integer)
     avg_session_sec = Column(Float)
     night_usage_flag = Column(Integer, default=0)
-    synced_at = Column(DateTime, default=datetime.datetime.utcnow)
+    synced_at = Column(DateTime, default=sl_now)
 
     # Without this, a race between the real-time /behavior/analyze call and the
     # periodic batch /behavior/sync call can both pass their own "does this row
@@ -128,7 +156,7 @@ class EmaLabel(Base):
     deviated_count = Column(Integer)
     details_json = Column(Text)
     responded_at = Column(DateTime)
-    synced_at = Column(DateTime, default=datetime.datetime.utcnow)
+    synced_at = Column(DateTime, default=sl_now)
 
 
 class BehaviorDeviation(Base):

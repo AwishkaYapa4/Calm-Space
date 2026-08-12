@@ -9,6 +9,7 @@ import json, datetime
 from .database import (
     create_tables, get_db, User, TelemetrySnapshot, InteractionEvent,
     BehaviorObservation, EmaLabel, BehaviorDeviation,
+    sl_now, sl_from_epoch_ms, epoch_ms_from_sl,
 )
 from .decision_engine import evaluate_window
 from .time_series_context_builder import build_context
@@ -170,7 +171,7 @@ def sync_behavior_observations(req: BehaviorSyncRequest, db: Session = Depends(g
     Dedupes on (user_id, window_start) so repeated sync ticks are safe."""
     inserted = 0
     for o in req.observations:
-        window_start_dt = datetime.datetime.utcfromtimestamp(o.window_start / 1000)
+        window_start_dt = sl_from_epoch_ms(o.window_start)
         exists = db.query(BehaviorObservation).filter(
             BehaviorObservation.user_id == req.user_id,
             BehaviorObservation.window_start == window_start_dt,
@@ -180,7 +181,7 @@ def sync_behavior_observations(req: BehaviorSyncRequest, db: Session = Depends(g
         db.add(BehaviorObservation(
             user_id=req.user_id,
             window_start=window_start_dt,
-            window_end=datetime.datetime.utcfromtimestamp(o.window_end / 1000),
+            window_end=sl_from_epoch_ms(o.window_end),
             screen_time_sec=o.screen_time_sec,
             unlock_count=o.unlock_count,
             notification_count=o.notification_count,
@@ -208,7 +209,7 @@ def analyze_behavior_window(req: BehaviorAnalyzeRequest, db: Session = Depends(g
     this user's real history in the database. Called immediately after each on-device
     15-min aggregation window, not batched — the app needs the trigger decision in
     near-real-time to show the EMA prompt while it's still relevant."""
-    window_start_dt = datetime.datetime.utcfromtimestamp(req.observation.window_start / 1000)
+    window_start_dt = sl_from_epoch_ms(req.observation.window_start)
     row = db.query(BehaviorObservation).filter(
         BehaviorObservation.user_id == req.user_id,
         BehaviorObservation.window_start == window_start_dt,
@@ -217,7 +218,7 @@ def analyze_behavior_window(req: BehaviorAnalyzeRequest, db: Session = Depends(g
         row = BehaviorObservation(
             user_id=req.user_id,
             window_start=window_start_dt,
-            window_end=datetime.datetime.utcfromtimestamp(req.observation.window_end / 1000),
+            window_end=sl_from_epoch_ms(req.observation.window_end),
             screen_time_sec=req.observation.screen_time_sec,
             unlock_count=req.observation.unlock_count,
             notification_count=req.observation.notification_count,
@@ -255,19 +256,19 @@ def submit_ema_label(req: EmaLabelIn, db: Session = Depends(get_db)):
     the cooldown so /behavior/analyze doesn't trigger again for 2 hours."""
     row = EmaLabel(
         user_id=req.user_id,
-        window_start=datetime.datetime.utcfromtimestamp(req.window_start / 1000),
+        window_start=sl_from_epoch_ms(req.window_start),
         stress_level=req.stress_level,
         mood=req.mood,
         deviated_count=req.deviated_count,
         details_json=json.dumps(req.details or {}),
-        responded_at=datetime.datetime.utcfromtimestamp(req.responded_at / 1000),
+        responded_at=sl_from_epoch_ms(req.responded_at),
     )
     db.add(row)
 
     if req.user_id:
         user = db.query(User).filter(User.id == req.user_id).first()
         if user:
-            user.last_ema_prompt_at = datetime.datetime.utcnow()
+            user.last_ema_prompt_at = sl_now()
 
     db.commit()
     return {"status": "logged", "id": row.id}
@@ -290,8 +291,8 @@ def behavior_history(user_id: int, limit: int = 12, db: Session = Depends(get_db
     }
     return [
         {
-            "window_start": int(o.window_start.replace(tzinfo=datetime.timezone.utc).timestamp() * 1000),
-            "window_end": int(o.window_end.replace(tzinfo=datetime.timezone.utc).timestamp() * 1000),
+            "window_start": epoch_ms_from_sl(o.window_start),
+            "window_end": epoch_ms_from_sl(o.window_end),
             "screen_time_sec": o.screen_time_sec,
             "unlock_count": o.unlock_count,
             "notification_count": o.notification_count,
@@ -310,7 +311,7 @@ def behavior_context(user_id: int, window_start: int | None = None, db: Session 
     window if none is given, so the app can show "what backs the latest
     analysis" without knowing a specific timestamp."""
     if window_start is not None:
-        target = datetime.datetime.utcfromtimestamp(window_start / 1000)
+        target = sl_from_epoch_ms(window_start)
     else:
         latest = (
             db.query(BehaviorObservation)
@@ -330,7 +331,7 @@ def behavior_context(user_id: int, window_start: int | None = None, db: Session 
 def behavior_daily_summary(user_id: int, days: int = 7, db: Session = Depends(get_db)):
     """Real per-day totals over the last N days — the week trend chart on the
     analysis page reads from here instead of a hardcoded stress curve."""
-    cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=days)
+    cutoff = sl_now() - datetime.timedelta(days=days)
     rows = (
         db.query(BehaviorObservation)
         .filter(BehaviorObservation.user_id == user_id, BehaviorObservation.window_start >= cutoff)
@@ -404,7 +405,7 @@ def get_telemetry(user_id: Optional[int] = None, db: Session = Depends(get_db)):
         # Falling back to MOCK_TELEMETRY here would silently show fabricated numbers
         # on a genuinely fresh account, which is the exact bug this endpoint existed
         # to fix in the first place.
-        today_start = datetime.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = sl_now().replace(hour=0, minute=0, second=0, microsecond=0)
         rows = db.query(BehaviorObservation).filter(
             BehaviorObservation.user_id == user_id,
             BehaviorObservation.window_start >= today_start,
@@ -478,7 +479,7 @@ def register_user(body: UserCreate, db: Session = Depends(get_db)):
 
 @app.get("/insights/weekly")
 def weekly_insights(db: Session = Depends(get_db)):
-    cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=7)
+    cutoff = sl_now() - datetime.timedelta(days=7)
     snaps = db.query(TelemetrySnapshot).filter(TelemetrySnapshot.captured_at >= cutoff).all()
     return [
         {"day": s.captured_at.strftime("%a"), "stress": s.predicted_stress, "unlocks": s.phone_unlocks}
@@ -535,7 +536,7 @@ def optimize_threshold(user_id: int, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(404, "User not found")
 
-    cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=1)
+    cutoff = sl_now() - datetime.timedelta(days=1)
     rejections = db.query(InteractionEvent).filter(
         InteractionEvent.user_id == user_id,
         InteractionEvent.event_type == "rejection_event",

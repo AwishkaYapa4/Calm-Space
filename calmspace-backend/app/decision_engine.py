@@ -6,7 +6,7 @@ import datetime
 import json
 from sqlalchemy.orm import Session
 
-from .database import BehaviorDeviation, User
+from .database import BehaviorDeviation, User, sl_now
 from .deviation_engine import compute_deviation
 from .temporal_engine import is_persistent_change
 
@@ -41,7 +41,7 @@ def evaluate_window(db: Session, observation):
         return {"trigger": False, "reason": "not_persistent", "deviation": deviation}
 
     user = db.query(User).filter(User.id == observation.user_id).first() if observation.user_id else None
-    if user and user.last_ema_prompt_at and (datetime.datetime.utcnow() - user.last_ema_prompt_at) < COOLDOWN:
+    if user and user.last_ema_prompt_at and (sl_now() - user.last_ema_prompt_at) < COOLDOWN:
         return {"trigger": False, "reason": "cooldown", "deviation": deviation}
 
     return {"trigger": True, "reason": None, "deviation": deviation}
