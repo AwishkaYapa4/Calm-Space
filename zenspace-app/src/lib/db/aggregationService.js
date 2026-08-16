@@ -54,8 +54,16 @@ export async function runAggregationTick() {
 const RETRY_BATCH_SIZE = 10;
 
 async function retryUnanalyzedWindows(db) {
+  // Newest first, not oldest first: the ALTER TABLE migration that added
+  // `analyzed` (schema.js) can't tell which pre-existing rows were already
+  // successfully analyzed years/days ago vs. genuinely never analyzed, so it
+  // defaults everything to 0 — meaning on an existing install this queue can
+  // start out with a large backlog of ancient, already-fine windows mixed in
+  // with the handful of recent, actually-broken ones. What matters for a
+  // timely EMA prompt is today's windows, not day-old history, so recent
+  // rows must not get stuck waiting behind that backlog.
   const rows = await db.getAllAsync(
-    'SELECT * FROM behavior_observations WHERE analyzed = 0 ORDER BY window_start ASC LIMIT ?',
+    'SELECT * FROM behavior_observations WHERE analyzed = 0 ORDER BY window_start DESC LIMIT ?',
     [RETRY_BATCH_SIZE]
   );
   for (const row of rows) {
