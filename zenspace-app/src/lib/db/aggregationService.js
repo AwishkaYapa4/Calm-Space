@@ -6,6 +6,12 @@ import { emitEmaTrigger } from '../behavior/emaBus';
 
 const WINDOW_MS = 15 * 60 * 1000;
 
+// Only run deviation/EMA-trigger analysis once we have a full day of
+// history — otherwise every early window looks "anomalous" against nothing,
+// and it saves a pointless network round-trip for the first day.
+// 96 = 1 day x 96 windows/day (15-minute windows).
+const MIN_HISTORY_WINDOWS = 96;
+
 function windowStartFor(timestamp) {
   return Math.floor(timestamp / WINDOW_MS) * WINDOW_MS;
 }
@@ -15,6 +21,15 @@ export async function runAggregationTick() {
   const db = await getDb();
   const now = Date.now();
   const currentWindowStart = windowStartFor(now);
+
+  // Retry first: attemptAnalysis() is only ever called once per row under
+  // normal flow, at the moment a window is first aggregated below. If that
+  // one attempt fails (offline, cold start, app restarting mid-call —
+  // exactly what happens during a reinstall), the window was permanently
+  // stuck "not analyzed" forever, since /behavior/sync (its only remaining
+  // path back to the backend) never computes a deviation for anything.
+  // Give every such row another shot on every tick until one succeeds.
+  await retryUnanalyzedWindows(db);
 
   const oldest = await db.getFirstAsync(
     'SELECT MIN(timestamp) as ts FROM behavior_events WHERE timestamp < ?',
@@ -33,6 +48,73 @@ export async function runAggregationTick() {
       await aggregateWindow(db, windowStart, windowEnd);
     }
     windowStart = windowEnd;
+  }
+}
+
+const RETRY_BATCH_SIZE = 10;
+
+async function retryUnanalyzedWindows(db) {
+  const rows = await db.getAllAsync(
+    'SELECT * FROM behavior_observations WHERE analyzed = 0 ORDER BY window_start ASC LIMIT ?',
+    [RETRY_BATCH_SIZE]
+  );
+  for (const row of rows) {
+    await attemptAnalysis(db, {
+      id: row.id,
+      window_start: row.window_start,
+      window_end: row.window_end,
+      screen_time_sec: row.screen_time_sec,
+      unlock_count: row.unlock_count,
+      notification_count: row.notification_count,
+      social_media_sec: row.social_media_sec,
+      session_count: row.session_count,
+      avg_session_sec: row.avg_session_sec,
+      night_usage_flag: row.night_usage_flag,
+    });
+  }
+}
+
+/** Runs the Python deviation/temporal/decision pipeline (server-side) for one
+ * already-locally-inserted observation, gated on having enough history to
+ * judge deviation at all. Leaves `analyzed = 0` (untouched) whenever it
+ * doesn't actually call the backend, whether because the history gate isn't
+ * met yet or because the call itself failed — both are "try again later",
+ * and retryUnanalyzedWindows() above is what later means. */
+async function attemptAnalysis(db, observation) {
+  const historyCheck = await db.getFirstAsync(
+    'SELECT COUNT(*) as n FROM behavior_observations WHERE window_start < ?',
+    [observation.window_start]
+  );
+  if ((historyCheck?.n ?? 0) < MIN_HISTORY_WINDOWS) return;
+
+  const userIdRaw = await AsyncStorage.getItem('cs_user_id');
+  const userId = userIdRaw ? Number(userIdRaw) : undefined;
+
+  // This also inserts/finds the row on the backend, so mark it synced too —
+  // skips the redundant batch sync for this window.
+  const result = await analyzeBehaviorWindow(observation, userId);
+  if (!result) return; // offline — next tick (or the batch sync, for `synced`) retries
+
+  await db.runAsync('UPDATE behavior_observations SET synced = 1, analyzed = 1 WHERE id = ?', [observation.id]);
+
+  if (result.trigger) {
+    // Persist first — this tick almost certainly ran headless (no app UI
+    // mounted, so nothing is subscribed to the event below yet). Without this,
+    // a genuine persistent-deviation trigger detected while the app is closed
+    // is simply lost forever.
+    await db.runAsync(
+      `INSERT INTO pending_ema_trigger (id, window_start, deviated_count, details_json)
+       VALUES (1, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET window_start = excluded.window_start,
+         deviated_count = excluded.deviated_count, details_json = excluded.details_json`,
+      [observation.window_start, result.deviated_count, JSON.stringify(result.per_feature)]
+    );
+    // Still emit live, for the case the app happens to already be open.
+    emitEmaTrigger({
+      windowStart: observation.window_start,
+      deviatedCount: result.deviated_count,
+      perFeature: result.per_feature,
+    });
   }
 }
 
@@ -98,7 +180,7 @@ async function aggregateWindow(db, windowStart, windowEnd) {
     night_usage_flag: nightUsageFlag,
   };
 
-  await db.runAsync(
+  const insert = await db.runAsync(
     `INSERT OR IGNORE INTO behavior_observations
       (window_start, window_end, screen_time_sec, unlock_count, notification_count, social_media_sec, session_count, avg_session_sec, night_usage_flag)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -115,45 +197,5 @@ async function aggregateWindow(db, windowStart, windowEnd) {
     ]
   );
 
-  // Only run deviation/EMA-trigger analysis once we have a full day of
-  // history — otherwise every early window looks "anomalous" against nothing,
-  // and it saves a pointless network round-trip for the first day.
-  // 96 = 1 day x 96 windows/day (15-minute windows).
-  const MIN_HISTORY_WINDOWS = 96;
-  const historyCheck = await db.getFirstAsync(
-    'SELECT COUNT(*) as n FROM behavior_observations WHERE window_start < ?',
-    [windowStart]
-  );
-  if ((historyCheck?.n ?? 0) < MIN_HISTORY_WINDOWS) return;
-
-  const userIdRaw = await AsyncStorage.getItem('cs_user_id');
-  const userId = userIdRaw ? Number(userIdRaw) : undefined;
-
-  // The Python deviation/temporal/decision pipeline runs server-side against this
-  // user's real history (see calmspace-backend/app/decision_engine.py) — this also
-  // inserts the row on the backend, so mark it synced to skip the redundant batch sync.
-  const result = await analyzeBehaviorWindow(observation, userId);
-  if (!result) return; // offline — syncService's batch sync will pick this window up later
-
-  await db.runAsync('UPDATE behavior_observations SET synced = 1 WHERE window_start = ?', [windowStart]);
-
-  if (result.trigger) {
-    // Persist first — this tick almost certainly ran headless (no app UI
-    // mounted, so nothing is subscribed to the event below yet). Without this,
-    // a genuine persistent-deviation trigger detected while the app is closed
-    // is simply lost forever.
-    await db.runAsync(
-      `INSERT INTO pending_ema_trigger (id, window_start, deviated_count, details_json)
-       VALUES (1, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET window_start = excluded.window_start,
-         deviated_count = excluded.deviated_count, details_json = excluded.details_json`,
-      [observation.window_start, result.deviated_count, JSON.stringify(result.per_feature)]
-    );
-    // Still emit live, for the case the app happens to already be open.
-    emitEmaTrigger({
-      windowStart: observation.window_start,
-      deviatedCount: result.deviated_count,
-      perFeature: result.per_feature,
-    });
-  }
+  await attemptAnalysis(db, { id: insert.lastInsertRowId, ...observation });
 }

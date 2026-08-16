@@ -27,7 +27,8 @@ export function getDb() {
           session_count INTEGER NOT NULL DEFAULT 0,
           avg_session_sec REAL NOT NULL DEFAULT 0,
           night_usage_flag INTEGER NOT NULL DEFAULT 0,
-          synced INTEGER NOT NULL DEFAULT 0
+          synced INTEGER NOT NULL DEFAULT 0,
+          analyzed INTEGER NOT NULL DEFAULT 0
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_behavior_observations_window ON behavior_observations(window_start);
 
@@ -67,6 +68,17 @@ export function getDb() {
           details_json TEXT
         );
       `);
+
+      // Lightweight migration for installs from before the `analyzed` column
+      // existed — CREATE TABLE IF NOT EXISTS above is a no-op on an existing
+      // table, so older installs need it added explicitly. Safe to run every
+      // open: SQLite rejects a duplicate column, which we just swallow.
+      try {
+        await db.execAsync('ALTER TABLE behavior_observations ADD COLUMN analyzed INTEGER NOT NULL DEFAULT 0');
+      } catch {
+        // column already exists
+      }
+
       return db;
     });
   }
