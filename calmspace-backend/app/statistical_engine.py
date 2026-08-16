@@ -1,9 +1,15 @@
 """Median / MAD / robust z-score — deliberately not mean/stdev, since a single
 heavy-usage day shouldn't blow out the baseline the way an outlier-sensitive
 mean would (Phase 6 of the CalmSense research architecture)."""
+import math
 import statistics
 
 MAD_SCALE = 0.6745  # normal-consistency constant
+
+# Sentinel z-score for "history was perfectly constant and this value isn't
+# it" — comfortably past Z_THRESHOLD (2.5) so it reads as anomalous without
+# claiming a precise magnitude we have no spread data to back up.
+CONSTANT_HISTORY_DEPARTURE_Z = 10.0
 
 
 def median(values):
@@ -33,10 +39,16 @@ def robust_z_score(value, history):
         if stdev_val > 0:
             return (value - med) / stdev_val
         # History is genuinely constant (real variance, not just MAD, is 0).
-        # With a short study (few data points per slot) this is common and
-        # doesn't mean "any deviation is extreme" — it means we don't have
-        # enough spread info to judge the deviation's size at all, so treat
-        # it the same as insufficient history rather than forcing a hard
-        # +/-3.5 that would flag even a trivial one-unit change as anomalous.
-        return 0.0
+        # A truly matching value is correctly "not anomalous" — but a value
+        # that differs at all from a baseline with zero observed spread is
+        # actually a *stronger* signal than one from a noisy baseline, not a
+        # weaker one: it's the difference between "unlike anything we've ever
+        # seen at this time" and "a bit high for a range that varies anyway".
+        # This matters in practice — real same-slot baselines are very often
+        # constant (e.g. always-0 overnight windows), and treating that as
+        # "can't judge" was silently blinding the detector at exactly those
+        # slots, no matter how extreme the actual value was.
+        if value == med:
+            return 0.0
+        return math.copysign(CONSTANT_HISTORY_DEPARTURE_Z, value - med)
     return (MAD_SCALE * (value - med)) / mad_val
