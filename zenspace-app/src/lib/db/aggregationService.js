@@ -1,8 +1,10 @@
+import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getDb } from './schema';
 import { isSocialMediaPackage } from './packageCategories';
 import { analyzeBehaviorWindow } from '../api';
 import { emitEmaTrigger } from '../behavior/emaBus';
+import { notifyEmaTrigger } from '../behavior/localNotify';
 
 const WINDOW_MS = 15 * 60 * 1000;
 
@@ -117,12 +119,22 @@ async function attemptAnalysis(db, observation) {
          deviated_count = excluded.deviated_count, details_json = excluded.details_json`,
       [observation.window_start, result.deviated_count, JSON.stringify(result.per_feature)]
     );
-    // Still emit live, for the case the app happens to already be open.
-    emitEmaTrigger({
-      windowStart: observation.window_start,
-      deviatedCount: result.deviated_count,
-      perFeature: result.per_feature,
-    });
+
+    if (AppState.currentState === 'active') {
+      // App is already open — the live event below shows the modal directly;
+      // a system notification on top of that would just be a redundant nag.
+      emitEmaTrigger({
+        windowStart: observation.window_start,
+        deviatedCount: result.deviated_count,
+        perFeature: result.per_feature,
+      });
+    } else {
+      // Almost certainly the headless path — nothing is listening for the
+      // live event (see the pending_ema_trigger comment in schema.js), so a
+      // system notification is the only way this actually reaches the user
+      // instead of silently waiting for them to happen to open the app.
+      await notifyEmaTrigger();
+    }
   }
 }
 
