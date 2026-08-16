@@ -52,6 +52,20 @@ export function getDb() {
           responded_at INTEGER NOT NULL,
           synced INTEGER NOT NULL DEFAULT 0
         );
+
+        -- The single most recent unresolved EMA trigger. Most 15-min ticks run
+        -- headless (BehaviorHeadlessTaskService, see headlessCaptureTask.js) with
+        -- no app UI mounted, so the live emitEmaTrigger() DeviceEventEmitter event
+        -- has nobody listening yet — it fires into a void the instant it's raised.
+        -- Persisting it here means _layout.jsx can pick it up the next time the
+        -- app is actually opened, instead of silently losing every trigger that
+        -- doesn't land while the user happens to already be in the app.
+        CREATE TABLE IF NOT EXISTS pending_ema_trigger (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          window_start INTEGER NOT NULL,
+          deviated_count INTEGER NOT NULL,
+          details_json TEXT
+        );
       `);
       return db;
     });

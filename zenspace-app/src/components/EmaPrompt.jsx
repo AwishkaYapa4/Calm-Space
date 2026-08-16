@@ -37,6 +37,7 @@ export default function EmaPrompt({ payload, onDismiss }) {
       },
       userIdRaw ? Number(userIdRaw) : undefined
     );
+    await db.runAsync('DELETE FROM pending_ema_trigger WHERE id = 1');
 
     setSubmitting(false);
     onDismiss();
@@ -44,6 +45,8 @@ export default function EmaPrompt({ payload, onDismiss }) {
 
   const skip = async () => {
     await AsyncStorage.setItem(LAST_PROMPT_KEY, String(Date.now()));
+    const db = await getDb();
+    await db.runAsync('DELETE FROM pending_ema_trigger WHERE id = 1');
     onDismiss();
   };
 

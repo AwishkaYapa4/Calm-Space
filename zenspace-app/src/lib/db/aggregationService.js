@@ -138,6 +138,18 @@ async function aggregateWindow(db, windowStart, windowEnd) {
   await db.runAsync('UPDATE behavior_observations SET synced = 1 WHERE window_start = ?', [windowStart]);
 
   if (result.trigger) {
+    // Persist first — this tick almost certainly ran headless (no app UI
+    // mounted, so nothing is subscribed to the event below yet). Without this,
+    // a genuine persistent-deviation trigger detected while the app is closed
+    // is simply lost forever.
+    await db.runAsync(
+      `INSERT INTO pending_ema_trigger (id, window_start, deviated_count, details_json)
+       VALUES (1, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET window_start = excluded.window_start,
+         deviated_count = excluded.deviated_count, details_json = excluded.details_json`,
+      [observation.window_start, result.deviated_count, JSON.stringify(result.per_feature)]
+    );
+    // Still emit live, for the case the app happens to already be open.
     emitEmaTrigger({
       windowStart: observation.window_start,
       deviatedCount: result.deviated_count,

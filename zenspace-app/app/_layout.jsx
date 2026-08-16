@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { startCapture, checkPermissions } from '../src/lib/db/captureService';
 import { subscribeToEmaTrigger } from '../src/lib/behavior/emaBus';
+import { getDb } from '../src/lib/db/schema';
 import EmaPrompt from '../src/components/EmaPrompt';
 
 export default function RootLayout() {
@@ -17,6 +18,22 @@ export default function RootLayout() {
       if (!profile) return;
       const { usageAccess, notificationAccess } = await checkPermissions();
       if (usageAccess || notificationAccess) startCapture();
+    })();
+
+    // Most triggers are detected by the headless background task (no UI
+    // mounted, nobody subscribed yet — see aggregationService.js), so the
+    // event below alone misses almost everything. Check for one left behind
+    // by an earlier headless tick every time the app is actually opened.
+    (async () => {
+      const db = await getDb();
+      const pending = await db.getFirstAsync('SELECT * FROM pending_ema_trigger WHERE id = 1');
+      if (pending) {
+        setEmaPayload({
+          windowStart: pending.window_start,
+          deviatedCount: pending.deviated_count,
+          perFeature: JSON.parse(pending.details_json || '{}'),
+        });
+      }
     })();
 
     const sub = subscribeToEmaTrigger((payload) => setEmaPayload(payload));
