@@ -54,19 +54,30 @@ export async function runAggregationTick() {
 }
 
 const RETRY_BATCH_SIZE = 10;
+const RETRY_MAX_AGE_MS = 3 * 60 * 60 * 1000; // 3 hours
 
 async function retryUnanalyzedWindows(db) {
-  // Newest first, not oldest first: the ALTER TABLE migration that added
-  // `analyzed` (schema.js) can't tell which pre-existing rows were already
-  // successfully analyzed years/days ago vs. genuinely never analyzed, so it
-  // defaults everything to 0 — meaning on an existing install this queue can
-  // start out with a large backlog of ancient, already-fine windows mixed in
-  // with the handful of recent, actually-broken ones. What matters for a
-  // timely EMA prompt is today's windows, not day-old history, so recent
-  // rows must not get stuck waiting behind that backlog.
+  // Bounded to recent windows only, and newest-first within that. The ALTER
+  // TABLE migration that added `analyzed` (schema.js) can't tell which
+  // pre-existing rows were already successfully analyzed days/weeks ago vs.
+  // genuinely never analyzed, so it defaults everything to 0 -- on an
+  // existing install that's potentially hundreds of ancient rows.
+  //
+  // Without the age bound, two real things went wrong (confirmed against
+  // Neon): (1) Android kills a headless JS task after 60s, and the retry
+  // loop working through that backlog left no time to reach the current
+  // window's own analysis -- exactly where a live, actionable trigger would
+  // be detected and a notification fired; (2) analyzing a days-old window
+  // re-runs evaluate_window() against *today's* history and can genuinely
+  // come back trigger:true, popping a "how do you feel right now" EMA
+  // prompt about behavior from three days ago -- happened for real, a
+  // 2026-08-14 window got answered on 2026-08-17. Old windows still deserve
+  // a correct deviated_count for the research record, just not through this
+  // live, user-facing loop -- that's what the one-off server backfill is for.
+  const cutoff = Date.now() - RETRY_MAX_AGE_MS;
   const rows = await db.getAllAsync(
-    'SELECT * FROM behavior_observations WHERE analyzed = 0 ORDER BY window_start DESC LIMIT ?',
-    [RETRY_BATCH_SIZE]
+    'SELECT * FROM behavior_observations WHERE analyzed = 0 AND window_start >= ? ORDER BY window_start DESC LIMIT ?',
+    [cutoff, RETRY_BATCH_SIZE]
   );
   for (const row of rows) {
     await attemptAnalysis(db, {
