@@ -1,10 +1,12 @@
 package com.calmsense.app.behavior
 
+import android.app.AlarmManager
 import android.app.AppOpsManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Process
 import android.provider.Settings
 import android.app.usage.UsageEvents
@@ -98,6 +100,29 @@ class UsageEventsModule(private val reactContext: ReactApplicationContext) :
   @ReactMethod
   fun openNotificationAccessSettings() {
     val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+      .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    reactContext.startActivity(intent)
+  }
+
+  // Without this, the 15-min background alarm (BehaviorCaptureForegroundService)
+  // silently degrades to inexact/Doze-deferrable scheduling -- true on every
+  // Android version, but only user-grantable (vs. auto-granted) on API 31+,
+  // which is why this check only applies from there.
+  @ReactMethod
+  fun hasExactAlarmAccess(promise: Promise) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+      promise.resolve(true)
+      return
+    }
+    val alarmManager = reactContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+    promise.resolve(alarmManager.canScheduleExactAlarms())
+  }
+
+  @ReactMethod
+  fun openExactAlarmSettings() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+    val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+      .setData(Uri.parse("package:${reactContext.packageName}"))
       .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     reactContext.startActivity(intent)
   }

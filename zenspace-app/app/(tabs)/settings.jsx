@@ -13,7 +13,7 @@ import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   hasNativeCaptureSupport, checkPermissions,
-  openUsageAccessSettings, openNotificationAccessSettings,
+  openUsageAccessSettings, openNotificationAccessSettings, openExactAlarmSettings,
 } from '../../src/lib/db/captureService';
 import { fetchBehaviorStats } from '../../src/lib/api';
 
@@ -88,7 +88,7 @@ export default function SettingsScreen() {
   const [profile, setProfile] = useState(null);
   const [copingStyle, setCopingStyle] = useState(null);
   const [sw, setSw] = useState(DEFAULT_SETTINGS);
-  const [capturePerms, setCapturePerms] = useState({ usageAccess: false, notificationAccess: false });
+  const [capturePerms, setCapturePerms] = useState({ usageAccess: false, notificationAccess: false, exactAlarmAccess: false });
   const [behaviorStats, setBehaviorStats] = useState(null);
 
   const persistSettings = (next) => AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
@@ -203,6 +203,14 @@ export default function SettingsScreen() {
                 label="Notification access"
                 desc={capturePerms.notificationAccess ? 'Granted — counts notifications only, never content' : 'Not granted — tap to enable in Settings'}
                 onPress={openNotificationAccessSettings}
+              />
+              <NavRow
+                emoji="⏰"
+                label="Alarms & reminders"
+                desc={capturePerms.exactAlarmAccess
+                  ? 'Granted — background check-ins run on time even when the phone is idle'
+                  : 'Not granted — background checks may be delayed for hours; tap to enable'}
+                onPress={openExactAlarmSettings}
                 last
               />
             </>

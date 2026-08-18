@@ -17,7 +17,8 @@
       "usesCleartextTraffic": true,
       "permissions": [
         "android.permission.POST_NOTIFICATIONS",
-        "android.permission.PACKAGE_USAGE_STATS"
+        "android.permission.PACKAGE_USAGE_STATS",
+        "android.permission.SCHEDULE_EXACT_ALARM"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#8B5CF6",

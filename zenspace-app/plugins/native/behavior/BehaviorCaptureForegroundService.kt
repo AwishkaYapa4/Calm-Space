@@ -34,12 +34,37 @@ class BehaviorCaptureForegroundService : Service() {
     fun stop(context: Context) {
       context.stopService(Intent(context, BehaviorCaptureForegroundService::class.java))
     }
-  }
 
-  private fun alarmPendingIntent(): PendingIntent {
-    val intent = Intent(this, BehaviorHeadlessTaskService::class.java)
-    val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    return PendingIntent.getService(this, 0, intent, flags)
+    private fun alarmPendingIntent(context: Context): PendingIntent {
+      val intent = Intent(context, BehaviorHeadlessTaskService::class.java)
+      val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+      return PendingIntent.getService(context, 0, intent, flags)
+    }
+
+    // Schedules exactly ONE alarm ~15 min out. setExactAndAllowWhileIdle is
+    // one-shot by design -- unlike the setInexactRepeating this replaces,
+    // which Doze mode is free to defer by hours once the device has been idle
+    // a while. Confirmed in production: hours of windows landed in a single
+    // burst the moment the app was reopened, instead of trickling in every 15
+    // min, and the EMA notification (only ever fired from inside that same
+    // tick) never got a chance to run while genuinely backgrounded because of
+    // it. Whoever's alarm fires (BehaviorHeadlessTaskService) is responsible
+    // for calling this again to keep the chain going -- see it for why.
+    fun scheduleNextExactAlarm(context: Context) {
+      val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+      val triggerAt = SystemClock.elapsedRealtime() + TICK_INTERVAL_MS
+      val pendingIntent = alarmPendingIntent(context)
+      val canBeExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()
+      if (canBeExact) {
+        alarmManager.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME, triggerAt, pendingIntent)
+      } else {
+        // "Alarms & reminders" special access not granted (Settings ->
+        // UsageEventsModule.openExactAlarmSettings() -- see settings.jsx).
+        // Still Doze-aware (unlike plain setInexactRepeating), just not
+        // exact-timed, so this degrades gracefully instead of going dark.
+        alarmManager.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME, triggerAt, pendingIntent)
+      }
+    }
   }
 
   override fun onCreate() {
@@ -48,21 +73,13 @@ class BehaviorCaptureForegroundService : Service() {
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-    val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-    // Inexact is fine — this is best-effort background aggregation, not a timer the
-    // user is watching, and it avoids needing the exact-alarm permission.
-    alarmManager.setInexactRepeating(
-      AlarmManager.ELAPSED_REALTIME,
-      SystemClock.elapsedRealtime() + TICK_INTERVAL_MS,
-      TICK_INTERVAL_MS,
-      alarmPendingIntent()
-    )
+    scheduleNextExactAlarm(this)
     return START_STICKY
   }
 
   override fun onDestroy() {
     val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-    alarmManager.cancel(alarmPendingIntent())
+    alarmManager.cancel(alarmPendingIntent(this))
     super.onDestroy()
   }
 

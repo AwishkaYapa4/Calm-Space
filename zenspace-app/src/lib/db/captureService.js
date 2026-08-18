@@ -53,12 +53,13 @@ export function hasNativeCaptureSupport() {
 }
 
 export async function checkPermissions() {
-  if (!UsageEventsModule) return { usageAccess: false, notificationAccess: false };
-  const [usageAccess, notificationAccess] = await Promise.all([
+  if (!UsageEventsModule) return { usageAccess: false, notificationAccess: false, exactAlarmAccess: false };
+  const [usageAccess, notificationAccess, exactAlarmAccess] = await Promise.all([
     UsageEventsModule.hasUsageAccess(),
     UsageEventsModule.hasNotificationAccess(),
+    UsageEventsModule.hasExactAlarmAccess(),
   ]);
-  return { usageAccess, notificationAccess };
+  return { usageAccess, notificationAccess, exactAlarmAccess };
 }
 
 export function openUsageAccessSettings() {
@@ -67,6 +68,13 @@ export function openUsageAccessSettings() {
 
 export function openNotificationAccessSettings() {
   UsageEventsModule?.openNotificationAccessSettings();
+}
+
+// Without this granted, the 15-min background alarm silently degrades from
+// exact (survives Doze) to best-effort (Doze can defer it by hours) — see
+// BehaviorCaptureForegroundService.scheduleNextExactAlarm.
+export function openExactAlarmSettings() {
+  UsageEventsModule?.openExactAlarmSettings();
 }
 
 export function startCapture() {
